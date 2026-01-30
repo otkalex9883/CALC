@@ -108,7 +108,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="title">AI 일부인 검사기</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">일부인 계산기</div>', unsafe_allow_html=True)
 st.write("")
 
 # 세션 상태 변수 초기화
