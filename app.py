@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import datetime
 import io
 import os
@@ -56,7 +56,7 @@ product_db = {
     "엔제리너스 딸기쨈 (디스펜팩)": 6,
     "에그드랍 딸기잼": 6,
     "딸기잼(스타벅스)": 6,
-    "스위트앤사워소스(대만 맥도날드)": 4,
+    "스위트앤사워소스(대만 맥도날드)": d120,
     "스위트앤젤 복숭아": 6,
     "스위트앤젤 파인": 6,
     "스위트앤젤 밀감": 6,
@@ -78,6 +78,8 @@ product_db = {
     "코울슬로(피자헛)": 1,
     "한컵 콘샐러드": 1,
     "한컵 코울슬로": 1,
+    # 예) 일 단위 소비기한 제품은 아래처럼 등록
+    # "어떤 제품(일단위)": "d120",
     "오뚜기 골드마요네스": 10,
     "60계 마요네스": 8,
     "핫케익시럽(수출용)": 6,
@@ -863,6 +865,47 @@ def get_target_date(start_date, months):
     else:
         return datetime.date(new_year, new_month, last_day)
 
+# =========================
+# 추가 로직(일 단위 소비기한 지원)
+# - product_db 값이 int(또는 숫자)면 "개월"
+# - product_db 값이 'd120' 같은 문자열이면 "일"
+# - 일 단위일 경우: 제조일자 + n일
+# =========================
+def parse_shelf_life(value):
+    """
+    반환:
+      - ("month", 개월수:int)  예: 120 -> ("month", 120)
+      - ("day", 일수:int)      예: "d120" -> ("day", 120)
+    """
+    # 1) int로 들어오면 개월로 처리
+    if isinstance(value, int):
+        return ("month", value)
+
+    # 2) 문자열 처리
+    if isinstance(value, str):
+        v = value.strip()
+
+        # 'd' 또는 'D'로 시작하는 경우: 일 단위
+        if (len(v) >= 2) and (v[0].lower() == "d"):
+            num = v[1:].strip()
+            if num.isdigit():
+                return ("day", int(num))
+
+        # 숫자 문자열이면 개월로 처리(호환)
+        if v.isdigit():
+            return ("month", int(v))
+
+    # 3) 그 외는 오류로 처리
+    raise ValueError(f"소비기한 형식 오류: {value!r} (예: 120 또는 'd120')")
+
+def get_target_date_by_days(start_date, days):
+    """
+    일 단위 소비기한 규칙:
+    - 제조일자에 days(일수)를 더한 날짜를 목표일부인으로 반환
+    """
+    return start_date + datetime.timedelta(days=days)
+# =========================
+
 if confirm:
     pname = st.session_state.product_input
     dt = st.session_state.date_input
@@ -874,19 +917,44 @@ if confirm:
         st.warning("제조일자를 입력하세요.")
         st.session_state.confirm_success = False
     else:
-        months = product_db[pname]
-        target_date = get_target_date(dt, months)
-        st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
-        st.session_state.confirm_success = True
-        st.session_state.ocr_result = None  # OCR 결과 초기화
-        st.success(
-            f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
-            icon="✅"
-        )
-        st.write(f"제품명: {pname}")
-        st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
-        st.write(f"소비기한(개월): {months}")
+        # -------------------------
+        # 기존 코드는 유지하고,
+        # 소비기한이 d### 인 경우만 추가 분기 처리
+        # -------------------------
+        shelf_life_value = product_db[pname]
+
+        try:
+            unit, amount = parse_shelf_life(shelf_life_value)
+        except ValueError as e:
+            st.warning(str(e))
+            st.session_state.confirm_success = False
+        else:
+            if unit == "day":
+                target_date = get_target_date_by_days(dt, amount)
+                st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
+                st.session_state.confirm_success = True
+                st.session_state.ocr_result = None  # OCR 결과 초기화
+                st.success(
+                    f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
+                    icon="✅"
+                )
+                st.write(f"제품명: {pname}")
+                st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
+                st.write(f"소비기한(일): {amount}")
+            else:
+                # 기존 개월 로직 그대로
+                months = amount
+                target_date = get_target_date(dt, months)
+                st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
+                st.session_state.confirm_success = True
+                st.session_state.ocr_result = None  # OCR 결과 초기화
+                st.success(
+                    f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
+                    icon="✅"
+                )
+                st.write(f"제품명: {pname}")
+                st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
+                st.write(f"소비기한(개월): {months}")
 
 if reset:
     st.experimental_rerun()
-
