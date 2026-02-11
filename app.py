@@ -14,7 +14,7 @@ except locale.Error:
 
 product_db = {
     "아삭 오이 피클": 6,
-    "스위트앤사워소스(대만 맥도날드)": d120,
+    "스위트앤사워소스(대만 맥도날드)": "d120",
 }
 
 st.markdown(
