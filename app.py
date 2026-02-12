@@ -11,7 +11,7 @@ try:
     locale.setlocale(locale.LC_TIME, 'ko_KR.UTF-8')
 except locale.Error:
     pass  # 환경에 한글 Locale이 없을 때는 무시
-
+st.write("Streamlit version:", st.__version__)
 # ✅ 중요:
 # 'd120' 같은 일 단위는 반드시 문자열로 넣어야 합니다. (따옴표 필수)
 product_db = {
