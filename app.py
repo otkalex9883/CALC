@@ -871,6 +871,7 @@ try:
 except TypeError:
     # locale 파라미터 미지원 환경 대비
     date_input = st.date_input(**date_input_kwargs)
+st.info("빌드 확인용 문구: 2026-02-13 v2")
 
 col1, col2 = st.columns([1, 1])
 confirm = col1.button("확인", key="confirm", help="제품명과 제조일자를 확인합니다.", use_container_width=True)
