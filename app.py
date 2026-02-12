@@ -6,12 +6,14 @@ import re
 import sys
 import locale
 
-# --- 한글 달력 및 요일을 위한 locale 설정 ---
+# --- 한글 달력 및 요일을 위한 locale 설정(서버 측) ---
 try:
     locale.setlocale(locale.LC_TIME, 'ko_KR.UTF-8')
 except locale.Error:
     pass  # 환경에 한글 Locale이 없을 때는 무시
 
+# ✅ 중요:
+# 'd120' 같은 일 단위는 반드시 문자열로 넣어야 합니다. (따옴표 필수)
 product_db = {
     "LIGHT&JOY_당을줄인 김천자두쨈 290G": 12,
     "LIGHT&JOY_당을줄인 논산딸기쨈 290G": 12,
@@ -92,8 +94,7 @@ product_db = {
     "후루츠쨈 300G": 24,
     "후루츠쨈 500G": 24,
     "후루츠쨈 850G": 24,
-
-    #여기까지 2팀이고 다음이 3팀===============================
+    ####여기까지 2팀##########
     "오뚜기 골드마요네스": 10,
     "60계 마요네스": 8,
     "핫케익시럽(수출용)": 6,
@@ -764,6 +765,13 @@ st.markdown(
 st.markdown('<div class="title">일부인 계산기</div>', unsafe_allow_html=True)
 st.write("")
 
+# -------------------------
+# KST(한국시간) 기준 "오늘" 계산
+# - 서버가 UTC일 때 날짜가 하루 전으로 보이는 문제를 방지
+# -------------------------
+KST = datetime.timezone(datetime.timedelta(hours=9))
+today_kst = datetime.datetime.now(KST).date()
+
 # 세션 상태 변수 초기화
 if "product_input" not in st.session_state:
     st.session_state.product_input = ""
@@ -783,7 +791,9 @@ if "ocr_result" not in st.session_state:
 def reset_all():
     st.session_state.product_input = ""
     st.session_state.selected_product_name = ""
-    st.session_state.date_input = None
+    # date_input을 None으로 두면 환경에 따라 기본값이 다시 UTC 오늘로 잡힐 수 있어
+    # 리셋 시에도 KST 오늘로 확실히 맞추기 위해 today_kst를 넣어줌
+    st.session_state.date_input = today_kst
     st.session_state.auto_complete_show = False
     st.session_state.reset_triggered = True
     st.session_state.confirm_success = False
@@ -846,11 +856,21 @@ elif not input_value.strip():
 
 # --- 제조일자 입력 ---
 st.write("제조일자")
-date_input = st.date_input(
-    "",
+
+# Streamlit 버전에 따라 date_input의 locale 인자가 없을 수 있어 안전하게 처리
+# - locale="ko-KR"가 지원되면 달력 월/요일이 한글로 표시될 가능성이 높음
+date_input_kwargs = dict(
+    label="",
     key="date_input",
-    format="YYYY.MM.DD"
+    format="YYYY.MM.DD",
+    value=st.session_state.get("date_input", today_kst),
 )
+
+try:
+    date_input = st.date_input(**date_input_kwargs, locale="ko-KR")
+except TypeError:
+    # locale 파라미터 미지원 환경 대비
+    date_input = st.date_input(**date_input_kwargs)
 
 col1, col2 = st.columns([1, 1])
 confirm = col1.button("확인", key="confirm", help="제품명과 제조일자를 확인합니다.", use_container_width=True)
@@ -880,11 +900,10 @@ def get_target_date(start_date, months):
         return datetime.date(new_year, new_month, last_day)
 
 # =========================
-# 추가 로직(일 단위 소비기한 지원)
-# - product_db 값이 int(또는 숫자)면 "개월"
-# - product_db 값이 'd120' 같은 문자열이면 "일"
-# - 일 단위일 경우(네이버 날짜계산기와 동일한 포함 방식):
-#     목표일부인 = 제조일자 + (일수 - 1)일
+# 추가 로직(일 단위 소비기한 지원 + 네이버 규칙)
+# - 120  -> 120개월
+# - "d120" -> 120일
+# - 일 단위 목표일부인(네이버 포함 계산): 제조일 + (일수-1)
 # =========================
 def parse_shelf_life(value):
     """
@@ -892,37 +911,23 @@ def parse_shelf_life(value):
       - ("month", 개월수:int)  예: 120 -> ("month", 120)
       - ("day", 일수:int)      예: "d120" -> ("day", 120)
     """
-    # 1) int로 들어오면 개월로 처리
     if isinstance(value, int):
         return ("month", value)
 
-    # 2) 문자열 처리
     if isinstance(value, str):
         v = value.strip()
 
-        # 'd' 또는 'D'로 시작하는 경우: 일 단위
         if (len(v) >= 2) and (v[0].lower() == "d"):
             num = v[1:].strip()
             if num.isdigit():
                 return ("day", int(num))
 
-        # 숫자 문자열이면 개월로 처리(호환)
         if v.isdigit():
             return ("month", int(v))
 
-    # 3) 그 외는 오류로 처리
     raise ValueError(f"소비기한 형식 오류: {value!r} (예: 120 또는 'd120')")
 
 def get_target_date_by_days(start_date, days):
-    """
-    일 단위 소비기한(네이버와 동일한 포함 계산):
-    - 제조일을 1일째로 포함해서 계산
-    - 목표일부인 = 제조일자 + (days - 1)일
-      예) 2025.12.31, d120 -> 2026.04.29
-
-    방어 로직:
-    - days <= 0 이면 형식상 비정상으로 보고 오류 처리
-    """
     if days <= 0:
         raise ValueError(f"일 단위 소비기한은 1 이상이어야 합니다: d{days}")
     return start_date + datetime.timedelta(days=days - 1)
@@ -965,7 +970,6 @@ if confirm:
                     st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
                     st.write(f"소비기한(일): {amount}")
             else:
-                # 기존 개월 로직 그대로
                 months = amount
                 target_date = get_target_date(dt, months)
                 st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
