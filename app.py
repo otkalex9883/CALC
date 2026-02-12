@@ -14,7 +14,8 @@ except locale.Error:
 
 product_db = {
     "아삭 오이 피클": 6,
-    "스위트앤사워소스(대만 맥도날드)": "d120",
+    # 예) 일 단위 소비기한 제품은 아래처럼 등록 (따옴표 필수)
+    # "스위트앤사워소스(대만 맥도날드)": "d120",
 }
 
 st.markdown(
@@ -167,7 +168,8 @@ def get_target_date(start_date, months):
 # 추가 로직(일 단위 소비기한 지원)
 # - product_db 값이 int(또는 숫자)면 "개월"
 # - product_db 값이 'd120' 같은 문자열이면 "일"
-# - 일 단위일 경우: 제조일자 + n일
+# - 일 단위일 경우(네이버 날짜계산기와 동일한 포함 방식):
+#     목표일부인 = 제조일자 + (일수 - 1)일
 # =========================
 def parse_shelf_life(value):
     """
@@ -198,10 +200,17 @@ def parse_shelf_life(value):
 
 def get_target_date_by_days(start_date, days):
     """
-    일 단위 소비기한 규칙:
-    - 제조일자에 days(일수)를 더한 날짜를 목표일부인으로 반환
+    일 단위 소비기한(네이버와 동일한 포함 계산):
+    - 제조일을 1일째로 포함해서 계산
+    - 목표일부인 = 제조일자 + (days - 1)일
+      예) 2025.12.31, d120 -> 2026.04.29
+
+    방어 로직:
+    - days <= 0 이면 형식상 비정상으로 보고 오류 처리
     """
-    return start_date + datetime.timedelta(days=days)
+    if days <= 0:
+        raise ValueError(f"일 단위 소비기한은 1 이상이어야 합니다: d{days}")
+    return start_date + datetime.timedelta(days=days - 1)
 # =========================
 
 if confirm:
@@ -215,10 +224,6 @@ if confirm:
         st.warning("제조일자를 입력하세요.")
         st.session_state.confirm_success = False
     else:
-        # -------------------------
-        # 기존 코드는 유지하고,
-        # 소비기한이 d### 인 경우만 추가 분기 처리
-        # -------------------------
         shelf_life_value = product_db[pname]
 
         try:
@@ -228,17 +233,22 @@ if confirm:
             st.session_state.confirm_success = False
         else:
             if unit == "day":
-                target_date = get_target_date_by_days(dt, amount)
-                st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
-                st.session_state.confirm_success = True
-                st.session_state.ocr_result = None  # OCR 결과 초기화
-                st.success(
-                    f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
-                    icon="✅"
-                )
-                st.write(f"제품명: {pname}")
-                st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
-                st.write(f"소비기한(일): {amount}")
+                try:
+                    target_date = get_target_date_by_days(dt, amount)
+                except ValueError as e:
+                    st.warning(str(e))
+                    st.session_state.confirm_success = False
+                else:
+                    st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
+                    st.session_state.confirm_success = True
+                    st.session_state.ocr_result = None  # OCR 결과 초기화
+                    st.success(
+                        f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
+                        icon="✅"
+                    )
+                    st.write(f"제품명: {pname}")
+                    st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
+                    st.write(f"소비기한(일): {amount}")
             else:
                 # 기존 개월 로직 그대로
                 months = amount
