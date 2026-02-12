@@ -11,7 +11,6 @@ try:
     locale.setlocale(locale.LC_TIME, 'ko_KR.UTF-8')
 except locale.Error:
     pass  # 환경에 한글 Locale이 없을 때는 무시
-st.write("Streamlit version:", st.__version__)
 # ✅ 중요:
 # 'd120' 같은 일 단위는 반드시 문자열로 넣어야 합니다. (따옴표 필수)
 product_db = {
@@ -871,7 +870,6 @@ try:
 except TypeError:
     # locale 파라미터 미지원 환경 대비
     date_input = st.date_input(**date_input_kwargs)
-st.info("빌드 확인용 문구: 2026-02-13 v2")
 
 col1, col2 = st.columns([1, 1])
 confirm = col1.button("확인", key="confirm", help="제품명과 제조일자를 확인합니다.", use_container_width=True)
