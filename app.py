@@ -13,7 +13,6 @@ except locale.Error:
     pass  # 환경에 한글 Locale이 없을 때는 무시
 
 product_db = {
-    {
     "LIGHT&JOY_당을줄인 김천자두쨈 290G": 12,
     "LIGHT&JOY_당을줄인 논산딸기쨈 290G": 12,
     "LIGHT&JOY_당을줄인 논산딸기쨈 480G": 12,
