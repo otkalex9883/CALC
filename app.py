@@ -1,18 +1,18 @@
 import streamlit as st
 import datetime
+import io
+import os
+import re
+import sys
 import locale
 
-# 외부 컴포넌트(한글 달력용)
-# 설치: pip install streamlit-datepicker
-from streamlit_datepicker import datepicker
-
-# --- 한글 달력 및 요일을 위한 locale 설정(서버 측: 출력용 보조) ---
+# --- 한글 달력 및 요일을 위한 locale 설정(서버 측) ---
 try:
-    locale.setlocale(locale.LC_TIME, "ko_KR.UTF-8")
+    locale.setlocale(locale.LC_TIME, 'ko_KR.UTF-8')
 except locale.Error:
-    pass
-
-# ✅ 중요: 'd120' 같은 일 단위는 반드시 문자열(따옴표 필수)
+    pass  # 환경에 한글 Locale이 없을 때는 무시
+# ✅ 중요:
+# 'd120' 같은 일 단위는 반드시 문자열로 넣어야 합니다. (따옴표 필수)
 product_db = {
     "LIGHT&JOY_당을줄인 김천자두쨈 290G": 12,
     "LIGHT&JOY_당을줄인 논산딸기쨈 290G": 12,
@@ -93,7 +93,7 @@ product_db = {
     "후루츠쨈 300G": 24,
     "후루츠쨈 500G": 24,
     "후루츠쨈 850G": 24,
-    #####여기까지2팀####
+    ####여기까지 2팀##########
     "오뚜기 골드마요네스": 10,
     "60계 마요네스": 8,
     "핫케익시럽(수출용)": 6,
@@ -730,7 +730,7 @@ product_db = {
     "크리미파마산소스(M)": 4,
     "할라피뇨마요(M)": 4,
     "맥도날드 케이준소스(홍콩)": 4,
-    "스파이시파마산소스(M)": 4 
+    "스파이시파마산소스(M)": 4
 }
 
 st.markdown(
@@ -739,7 +739,14 @@ st.markdown(
     .main {background-color: #fff;}
     div.stTextInput > label, div.stDateInput > label {font-weight: bold;}
     input[data-testid="stTextInput"] {background-color: #eee;}
+    .yellow-button button {
+      background-color: #FFD600 !important;
+      color: black !important;
+      font-weight: bold;
+    }
     .title {font-size:36px; font-weight:bold;}
+    .big-blue {font-size:36px; font-weight:bold; color:#1976D2;}
+    .big-red {font-size:36px; font-weight:bold; color:#d32f2f;}
     </style>
     """,
     unsafe_allow_html=True
@@ -758,7 +765,8 @@ st.markdown('<div class="title">일부인 계산기</div>', unsafe_allow_html=Tr
 st.write("")
 
 # -------------------------
-# KST(한국시간) 기준 "오늘"
+# KST(한국시간) 기준 "오늘" 계산
+# - 서버가 UTC일 때 날짜가 하루 전으로 보이는 문제를 방지
 # -------------------------
 KST = datetime.timezone(datetime.timedelta(hours=9))
 today_kst = datetime.datetime.now(KST).date()
@@ -778,12 +786,12 @@ if "target_date_value" not in st.session_state:
     st.session_state.target_date_value = ""
 if "ocr_result" not in st.session_state:
     st.session_state.ocr_result = None
-if "date_input" not in st.session_state:
-    st.session_state.date_input = today_kst  # 기본값 KST 오늘
 
 def reset_all():
     st.session_state.product_input = ""
     st.session_state.selected_product_name = ""
+    # date_input을 None으로 두면 환경에 따라 기본값이 다시 UTC 오늘로 잡힐 수 있어
+    # 리셋 시에도 KST 오늘로 확실히 맞추기 위해 today_kst를 넣어줌
     st.session_state.date_input = today_kst
     st.session_state.auto_complete_show = False
     st.session_state.reset_triggered = True
@@ -798,7 +806,7 @@ def on_change_input():
     st.session_state.auto_complete_show = True
     st.session_state.selected_product_name = ""
 
-st.text_input(
+product_input = st.text_input(
     "",
     value=st.session_state.product_input,
     key="product_input",
@@ -840,24 +848,28 @@ if input_value.strip() and st.session_state.auto_complete_show:
             use_container_width=True
         )
         col2.write("")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 elif not input_value.strip():
     st.session_state.selected_product_name = ""
     st.session_state.auto_complete_show = False
 
-# --- 제조일자 입력(한글 달력) ---
+# --- 제조일자 입력 ---
 st.write("제조일자")
 
-# datepicker는 날짜(date)를 반환
-picked = datepicker(
-    value=st.session_state.date_input,
-    locale="ko",                  # ✅ 한글 로케일
-    date_format="yyyy.mm.dd",     # 입력창 표시 형식
+# Streamlit 버전에 따라 date_input의 locale 인자가 없을 수 있어 안전하게 처리
+# - locale="ko-KR"가 지원되면 달력 월/요일이 한글로 표시될 가능성이 높음
+date_input_kwargs = dict(
+    label="",
+    key="date_input",
+    format="YYYY.MM.DD",
+    value=st.session_state.get("date_input", today_kst),
 )
 
-# 컴포넌트 반환값을 세션에 반영
-if isinstance(picked, datetime.date):
-    st.session_state.date_input = picked
+try:
+    date_input = st.date_input(**date_input_kwargs, locale="ko-KR")
+except TypeError:
+    # locale 파라미터 미지원 환경 대비
+    date_input = st.date_input(**date_input_kwargs)
 
 col1, col2 = st.columns([1, 1])
 confirm = col1.button("확인", key="confirm", help="제품명과 제조일자를 확인합니다.", use_container_width=True)
@@ -867,14 +879,10 @@ def is_leap_year(year):
     return (year % 4 == 0) and ((year % 100 != 0) or (year % 400 == 0))
 
 def get_last_day(year, month):
-    if month in [1, 3, 5, 7, 8, 10, 12]:
-        return 31
-    elif month in [4, 6, 9, 11]:
-        return 30
-    elif month == 2:
-        return 29 if is_leap_year(year) else 28
-    else:
-        return 30
+    if month in [1,3,5,7,8,10,12]: return 31
+    elif month in [4,6,9,11]: return 30
+    elif month == 2: return 29 if is_leap_year(year) else 28
+    else: return 30
 
 def get_target_date(start_date, months):
     y, m, d = start_date.year, start_date.month, start_date.day
@@ -886,11 +894,22 @@ def get_target_date(start_date, months):
         if d == 1:
             return datetime.date(new_year, new_month, 1)
         else:
-            return datetime.date(new_year, new_month, d - 1)
+            return datetime.date(new_year, new_month, d-1)
     else:
         return datetime.date(new_year, new_month, last_day)
 
+# =========================
+# 추가 로직(일 단위 소비기한 지원 + 네이버 규칙)
+# - 120  -> 120개월
+# - "d120" -> 120일
+# - 일 단위 목표일부인(네이버 포함 계산): 제조일 + (일수-1)
+# =========================
 def parse_shelf_life(value):
+    """
+    반환:
+      - ("month", 개월수:int)  예: 120 -> ("month", 120)
+      - ("day", 일수:int)      예: "d120" -> ("day", 120)
+    """
     if isinstance(value, int):
         return ("month", value)
 
@@ -910,8 +929,8 @@ def parse_shelf_life(value):
 def get_target_date_by_days(start_date, days):
     if days <= 0:
         raise ValueError(f"일 단위 소비기한은 1 이상이어야 합니다: d{days}")
-    # ✅ 네이버 포함 계산: 제조일 + (days - 1)
     return start_date + datetime.timedelta(days=days - 1)
+# =========================
 
 if confirm:
     pname = st.session_state.product_input
@@ -939,20 +958,26 @@ if confirm:
                     st.warning(str(e))
                     st.session_state.confirm_success = False
                 else:
-                    st.session_state.target_date_value = target_date.strftime("%Y.%m.%d")
+                    st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
                     st.session_state.confirm_success = True
-                    st.session_state.ocr_result = None
-                    st.success(f"목표일부인: {target_date.strftime('%Y.%m.%d')}", icon="✅")
+                    st.session_state.ocr_result = None  # OCR 결과 초기화
+                    st.success(
+                        f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
+                        icon="✅"
+                    )
                     st.write(f"제품명: {pname}")
                     st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
                     st.write(f"소비기한(일): {amount}")
             else:
                 months = amount
                 target_date = get_target_date(dt, months)
-                st.session_state.target_date_value = target_date.strftime("%Y.%m.%d")
+                st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
                 st.session_state.confirm_success = True
-                st.session_state.ocr_result = None
-                st.success(f"목표일부인: {target_date.strftime('%Y.%m.%d')}", icon="✅")
+                st.session_state.ocr_result = None  # OCR 결과 초기화
+                st.success(
+                    f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
+                    icon="✅"
+                )
                 st.write(f"제품명: {pname}")
                 st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
                 st.write(f"소비기한(개월): {months}")
