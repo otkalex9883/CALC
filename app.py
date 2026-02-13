@@ -1,18 +1,13 @@
 import streamlit as st
 import datetime
-import io
-import os
-import re
-import sys
 import locale
+import streamlit.components.v1 as components
 
-# --- 한글 달력 및 요일을 위한 locale 설정(서버 측) ---
 try:
-    locale.setlocale(locale.LC_TIME, 'ko_KR.UTF-8')
+    locale.setlocale(locale.LC_TIME, "ko_KR.UTF-8")
 except locale.Error:
-    pass  # 환경에 한글 Locale이 없을 때는 무시
-# ✅ 중요:
-# 'd120' 같은 일 단위는 반드시 문자열로 넣어야 합니다. (따옴표 필수)
+    pass
+
 product_db = {
     "LIGHT&JOY_당을줄인 김천자두쨈 290G": 12,
     "LIGHT&JOY_당을줄인 논산딸기쨈 290G": 12,
@@ -93,7 +88,7 @@ product_db = {
     "후루츠쨈 300G": 24,
     "후루츠쨈 500G": 24,
     "후루츠쨈 850G": 24,
-    ####여기까지 2팀##########
+    ####여기까지2팀####
     "오뚜기 골드마요네스": 10,
     "60계 마요네스": 8,
     "핫케익시럽(수출용)": 6,
@@ -737,154 +732,57 @@ st.markdown(
     """
     <style>
     .main {background-color: #fff;}
-    div.stTextInput > label, div.stDateInput > label {font-weight: bold;}
+    div.stTextInput > label {font-weight: bold;}
     input[data-testid="stTextInput"] {background-color: #eee;}
-    .yellow-button button {
-      background-color: #FFD600 !important;
-      color: black !important;
-      font-weight: bold;
-    }
     .title {font-size:36px; font-weight:bold;}
-    .big-blue {font-size:36px; font-weight:bold; color:#1976D2;}
-    .big-red {font-size:36px; font-weight:bold; color:#d32f2f;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
-st.markdown(
-    """
-    <style>
-        section.main > div {max-width: 390px; min-width: 390px;}
+    .scroll-list {
+        max-height: 180px;
+        overflow-y: auto;
+        border:1px solid #ddd;
+        padding:5px;
+        margin-bottom:5px;
+    }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 st.markdown('<div class="title">일부인 계산기</div>', unsafe_allow_html=True)
 st.write("")
 
-# -------------------------
-# KST(한국시간) 기준 "오늘" 계산
-# - 서버가 UTC일 때 날짜가 하루 전으로 보이는 문제를 방지
-# -------------------------
 KST = datetime.timezone(datetime.timedelta(hours=9))
 today_kst = datetime.datetime.now(KST).date()
 
-# 세션 상태 변수 초기화
-if "product_input" not in st.session_state:
-    st.session_state.product_input = ""
-if "auto_complete_show" not in st.session_state:
-    st.session_state.auto_complete_show = False
-if "selected_product_name" not in st.session_state:
-    st.session_state.selected_product_name = ""
-if "reset_triggered" not in st.session_state:
-    st.session_state.reset_triggered = False
-if "confirm_success" not in st.session_state:
-    st.session_state.confirm_success = False
-if "target_date_value" not in st.session_state:
-    st.session_state.target_date_value = ""
-if "ocr_result" not in st.session_state:
-    st.session_state.ocr_result = None
+st.session_state.setdefault("product_input", "")
+st.session_state.setdefault("auto_complete_show", False)
+st.session_state.setdefault("selected_product_name", "")
+st.session_state.setdefault("date_input", today_kst)
 
-def reset_all():
-    st.session_state.product_input = ""
-    st.session_state.selected_product_name = ""
-    # date_input을 None으로 두면 환경에 따라 기본값이 다시 UTC 오늘로 잡힐 수 있어
-    # 리셋 시에도 KST 오늘로 확실히 맞추기 위해 today_kst를 넣어줌
-    st.session_state.date_input = today_kst
-    st.session_state.auto_complete_show = False
-    st.session_state.reset_triggered = True
-    st.session_state.confirm_success = False
-    st.session_state.target_date_value = ""
-    st.session_state.ocr_result = None
+def parse_shelf_life(value):
+    if isinstance(value, int):
+        return ("month", value)
+    if isinstance(value, str):
+        v = value.strip()
+        if len(v) >= 2 and v[0].lower() == "d":
+            num = v[1:].strip()
+            if num.isdigit():
+                return ("day", int(num))
+        if v.isdigit():
+            return ("month", int(v))
+    raise ValueError(f"소비기한 형식 오류: {value!r} (예: 120 또는 'd120')")
 
-# --- 제품명 입력과 자동완성 ---
-st.write("제품명을 입력하세요")
-
-def on_change_input():
-    st.session_state.auto_complete_show = True
-    st.session_state.selected_product_name = ""
-
-product_input = st.text_input(
-    "",
-    value=st.session_state.product_input,
-    key="product_input",
-    on_change=on_change_input
-)
-
-input_value = st.session_state.product_input
-matching_products = [
-    name for name in product_db.keys()
-    if input_value.strip() and input_value.strip() in name
-]
-
-def select_product(name):
-    st.session_state.product_input = name
-    st.session_state.selected_product_name = name
-    st.session_state.auto_complete_show = False
-
-if input_value.strip() and st.session_state.auto_complete_show:
-    st.write("입력한 내용과 일치하는 제품명:")
-    st.markdown("""
-    <style>
-        .scroll-list {
-            max-height: 180px;
-            overflow-y: auto;
-            border:1px solid #ddd;
-            padding:5px;
-            margin-bottom:5px;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    st.markdown('<div class="scroll-list">', unsafe_allow_html=True)
-    for name in matching_products:
-        col1, col2 = st.columns([8, 1])
-        col1.button(
-            name,
-            key=f"btn_{name}",
-            on_click=select_product,
-            args=(name,),
-            use_container_width=True
-        )
-        col2.write("")
-    st.markdown('</div>', unsafe_allow_html=True)
-elif not input_value.strip():
-    st.session_state.selected_product_name = ""
-    st.session_state.auto_complete_show = False
-
-# --- 제조일자 입력 ---
-st.write("제조일자")
-
-# Streamlit 버전에 따라 date_input의 locale 인자가 없을 수 있어 안전하게 처리
-# - locale="ko-KR"가 지원되면 달력 월/요일이 한글로 표시될 가능성이 높음
-date_input_kwargs = dict(
-    label="",
-    key="date_input",
-    format="YYYY.MM.DD",
-    value=st.session_state.get("date_input", today_kst),
-)
-
-try:
-    date_input = st.date_input(**date_input_kwargs, locale="ko-KR")
-except TypeError:
-    # locale 파라미터 미지원 환경 대비
-    date_input = st.date_input(**date_input_kwargs)
-
-col1, col2 = st.columns([1, 1])
-confirm = col1.button("확인", key="confirm", help="제품명과 제조일자를 확인합니다.", use_container_width=True)
-reset = col2.button("새로고침", key="reset", on_click=reset_all, use_container_width=True)
-
-def is_leap_year(year):
+def is_leap_year(year: int) -> bool:
     return (year % 4 == 0) and ((year % 100 != 0) or (year % 400 == 0))
 
-def get_last_day(year, month):
-    if month in [1,3,5,7,8,10,12]: return 31
-    elif month in [4,6,9,11]: return 30
-    elif month == 2: return 29 if is_leap_year(year) else 28
-    else: return 30
+def get_last_day(year: int, month: int) -> int:
+    if month in (1, 3, 5, 7, 8, 10, 12):
+        return 31
+    if month in (4, 6, 9, 11):
+        return 30
+    return 29 if is_leap_year(year) else 28
 
-def get_target_date(start_date, months):
+def get_target_date(start_date: datetime.date, months: int) -> datetime.date:
     y, m, d = start_date.year, start_date.month, start_date.day
     new_month = m + months
     new_year = y + (new_month - 1) // 12
@@ -893,94 +791,252 @@ def get_target_date(start_date, months):
     if d <= last_day:
         if d == 1:
             return datetime.date(new_year, new_month, 1)
-        else:
-            return datetime.date(new_year, new_month, d-1)
-    else:
-        return datetime.date(new_year, new_month, last_day)
+        return datetime.date(new_year, new_month, d - 1)
+    return datetime.date(new_year, new_month, last_day)
 
-# =========================
-# 추가 로직(일 단위 소비기한 지원 + 네이버 규칙)
-# - 120  -> 120개월
-# - "d120" -> 120일
-# - 일 단위 목표일부인(네이버 포함 계산): 제조일 + (일수-1)
-# =========================
-def parse_shelf_life(value):
-    """
-    반환:
-      - ("month", 개월수:int)  예: 120 -> ("month", 120)
-      - ("day", 일수:int)      예: "d120" -> ("day", 120)
-    """
-    if isinstance(value, int):
-        return ("month", value)
-
-    if isinstance(value, str):
-        v = value.strip()
-
-        if (len(v) >= 2) and (v[0].lower() == "d"):
-            num = v[1:].strip()
-            if num.isdigit():
-                return ("day", int(num))
-
-        if v.isdigit():
-            return ("month", int(v))
-
-    raise ValueError(f"소비기한 형식 오류: {value!r} (예: 120 또는 'd120')")
-
-def get_target_date_by_days(start_date, days):
+def get_target_date_by_days(start_date: datetime.date, days: int) -> datetime.date:
     if days <= 0:
         raise ValueError(f"일 단위 소비기한은 1 이상이어야 합니다: d{days}")
     return start_date + datetime.timedelta(days=days - 1)
-# =========================
 
+# -----------------------------
+# Product input + autocomplete
+# -----------------------------
+st.write("제품명을 입력하세요")
+
+def on_change_input():
+    st.session_state.auto_complete_show = True
+    st.session_state.selected_product_name = ""
+
+st.text_input(
+    label="제품명",
+    value=st.session_state.product_input,
+    key="product_input",
+    on_change=on_change_input,
+    label_visibility="collapsed",
+)
+
+input_value = st.session_state.product_input
+matching_products = [
+    name for name in product_db.keys()
+    if input_value.strip() and input_value.strip() in name
+]
+
+def select_product(name: str):
+    st.session_state.product_input = name
+    st.session_state.selected_product_name = name
+    st.session_state.auto_complete_show = False
+
+if input_value.strip() and st.session_state.auto_complete_show:
+    st.write("입력한 내용과 일치하는 제품명:")
+    st.markdown('<div class="scroll-list">', unsafe_allow_html=True)
+    for name in matching_products:
+        col1, col2 = st.columns([8, 1])
+        col1.button(name, key=f"btn_{name}", on_click=select_product, args=(name,), use_container_width=True)
+        col2.write("")
+    st.markdown("</div>", unsafe_allow_html=True)
+elif not input_value.strip():
+    st.session_state.selected_product_name = ""
+    st.session_state.auto_complete_show = False
+
+# -----------------------------
+# Date: single source of truth via query param mfg
+#   - Both input and calendar write to mfg
+#   - Python reads mfg and updates session_state.date_input
+# -----------------------------
+st.write("제조일자")
+
+qp_key_date = "mfg"
+qp_key_cal = "cal"
+
+if qp_key_date in st.query_params:
+    try:
+        st.session_state.date_input = datetime.date.fromisoformat(st.query_params[qp_key_date])
+    except Exception:
+        pass
+else:
+    # initialize query once
+    st.query_params[qp_key_date] = st.session_state.date_input.isoformat()
+
+default_iso = st.session_state.date_input.isoformat()
+cal_open = (qp_key_cal in st.query_params) and (str(st.query_params[qp_key_cal]) == "1")
+
+# (1) Custom date INPUT (components) - fully controlled
+date_input_html = f"""
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ko.js"></script>
+
+<style>
+  body {{ margin:0; padding:0; background:transparent; }}
+  input {{
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #33383f;
+    background: rgba(255,255,255,0.06);
+    color: white;
+    outline: none;
+    font-size: 16px;
+  }}
+  input:focus {{
+    border-color: #ff4b4b;
+  }}
+</style>
+
+<input id="top_date" placeholder="YYYY.MM.DD" />
+
+<script>
+(function() {{
+  const input = document.getElementById("top_date");
+
+  function setQuery(params) {{
+    const url = new URL(window.parent.location.href);
+    Object.keys(params).forEach((k) => {{
+      const v = params[k];
+      if (v === null || v === undefined) url.searchParams.delete(k);
+      else url.searchParams.set(k, v);
+    }});
+    window.parent.history.replaceState({{}}, "", url.toString());
+    window.parent.dispatchEvent(new Event("popstate"));
+  }}
+
+  // keep value synced from query on each rerender
+  input.value = "{st.session_state.date_input.strftime('%Y.%m.%d')}";
+
+  // open calendar expander when focused
+  input.addEventListener("focus", () => setQuery({{ "{qp_key_cal}": "1" }}));
+  input.addEventListener("click",  () => setQuery({{ "{qp_key_cal}": "1" }}));
+
+  // accept manual typing: on blur, parse and write to query
+  input.addEventListener("blur", () => {{
+    const raw = (input.value || "").trim();
+    if (!raw) return;
+
+    // normalize to YYYY-MM-DD
+    let iso = null;
+
+    // YYYY.MM.DD / YYYY-MM-DD / YYYY/MM/DD
+    const sepMatch = raw.match(/^(\d{{4}})[.\/-](\d{{1,2}})[.\/-](\d{{1,2}})$/);
+    if (sepMatch) {{
+      const y = sepMatch[1];
+      const m = String(parseInt(sepMatch[2], 10)).padStart(2, "0");
+      const d = String(parseInt(sepMatch[3], 10)).padStart(2, "0");
+      iso = `${{y}}-${{m}}-${{d}}`;
+    }}
+
+    // YYYYMMDD
+    const ymdMatch = raw.match(/^(\d{{4}})(\d{{2}})(\d{{2}})$/);
+    if (!iso && ymdMatch) {{
+      iso = `${{ymdMatch[1]}}-${{ymdMatch[2]}}-${{ymdMatch[3]}}`;
+    }}
+
+    if (iso) {{
+      setQuery({{ "{qp_key_date}": iso, "{qp_key_cal}": "1" }});
+    }}
+  }});
+}})();
+</script>
+"""
+components.html(date_input_html, height=56)
+
+# (2) Calendar (components) - inline calendar ONLY (remove useless white input)
+with st.expander("달력", expanded=cal_open):
+    cal_html = f"""
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ko.js"></script>
+
+    <style>
+      body {{ margin:0; padding:0; background:transparent; }}
+      #inline_holder {{ margin-top: 6px; }}
+      /* hide the useless white input entirely */
+      #hidden_input {{
+        position: absolute;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }}
+      .flatpickr-calendar {{ z-index: 999999 !important; }}
+    </style>
+
+    <input id="hidden_input" />
+    <div id="inline_holder"></div>
+
+    <script>
+    (function() {{
+      const hiddenInput = document.getElementById("hidden_input");
+      const holder = document.getElementById("inline_holder");
+
+      function setQuery(params) {{
+        const url = new URL(window.parent.location.href);
+        Object.keys(params).forEach((k) => {{
+          const v = params[k];
+          if (v === null || v === undefined) url.searchParams.delete(k);
+          else url.searchParams.set(k, v);
+        }});
+        window.parent.history.replaceState({{}}, "", url.toString());
+        window.parent.dispatchEvent(new Event("popstate"));
+      }}
+
+      flatpickr(hiddenInput, {{
+        locale: "ko",
+        dateFormat: "Y.m.d",
+        defaultDate: "{default_iso}",
+        inline: true,
+        appendTo: holder,
+        disableMobile: true,
+        onChange: function(selectedDates) {{
+          const d = selectedDates[0];
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, "0");
+          const dd = String(d.getDate()).padStart(2, "0");
+          const iso = `${{yyyy}}-${{mm}}-${{dd}}`;
+
+          // calendar selection -> update query -> rerun -> top input rerenders with new value
+          setQuery({{
+            "{qp_key_date}": iso,
+            "{qp_key_cal}": null
+          }});
+        }}
+      }});
+    }})();
+    </script>
+    """
+    components.html(cal_html, height=360)
+
+# -----------------------------
+# Buttons (새로고침 제거, 확인 버튼 단독 전체폭)
+# -----------------------------
+confirm = st.button("확인", key="confirm", use_container_width=True)
+
+# -----------------------------
+# Confirm action
+# -----------------------------
 if confirm:
-    pname = st.session_state.product_input
+    pname = st.session_state.product_input.strip()
     dt = st.session_state.date_input
 
-    if pname not in product_db.keys():
+    if pname not in product_db:
         st.warning("제품명을 정확하게 입력하거나 목록에서 선택하세요.")
-        st.session_state.confirm_success = False
-    elif dt is None:
-        st.warning("제조일자를 입력하세요.")
-        st.session_state.confirm_success = False
     else:
-        shelf_life_value = product_db[pname]
-
         try:
-            unit, amount = parse_shelf_life(shelf_life_value)
-        except ValueError as e:
-            st.warning(str(e))
-            st.session_state.confirm_success = False
-        else:
+            unit, amount = parse_shelf_life(product_db[pname])
             if unit == "day":
-                try:
-                    target_date = get_target_date_by_days(dt, amount)
-                except ValueError as e:
-                    st.warning(str(e))
-                    st.session_state.confirm_success = False
-                else:
-                    st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
-                    st.session_state.confirm_success = True
-                    st.session_state.ocr_result = None  # OCR 결과 초기화
-                    st.success(
-                        f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
-                        icon="✅"
-                    )
-                    st.write(f"제품명: {pname}")
-                    st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
-                    st.write(f"소비기한(일): {amount}")
-            else:
-                months = amount
-                target_date = get_target_date(dt, months)
-                st.session_state.target_date_value = target_date.strftime('%Y.%m.%d')
-                st.session_state.confirm_success = True
-                st.session_state.ocr_result = None  # OCR 결과 초기화
-                st.success(
-                    f"목표일부인: {target_date.strftime('%Y.%m.%d')}",
-                    icon="✅"
-                )
+                target_date = get_target_date_by_days(dt, amount)
+                st.success(f"목표일부인: {target_date.strftime('%Y.%m.%d')}", icon="✅")
                 st.write(f"제품명: {pname}")
                 st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
-                st.write(f"소비기한(개월): {months}")
-
-if reset:
-    st.experimental_rerun()
+                st.write(f"소비기한(일): {amount}")
+            else:
+                target_date = get_target_date(dt, amount)
+                st.success(f"목표일부인: {target_date.strftime('%Y.%m.%d')}", icon="✅")
+                st.write(f"제품명: {pname}")
+                st.write(f"제조일자: {dt.strftime('%Y.%m.%d')}")
+                st.write(f"소비기한(개월): {amount}")
+        except Exception as e:
+            st.warning(str(e))
